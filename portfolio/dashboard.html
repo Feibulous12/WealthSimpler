@@ -1,0 +1,80 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1'>
+  <title>Portfolio Insight</title>
+  <style>
+    body { font-family: ui-sans-serif, -apple-system, Segoe UI, sans-serif; margin: 16px; background: #f6f8fb; color: #0f172a; }
+    .kpi { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 12px; }
+    .card { background: white; border-radius: 12px; padding: 12px; border: 1px solid #dbe1ea; }
+    .value { font-size: 22px; font-weight: 700; margin-top: 6px; }
+    .banner { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: #fff7ed; border: 1px solid #fed7aa; }
+    .section { margin-top: 16px; }
+    .section h2 { font-size: 18px; margin-bottom: 8px; }
+    .treemap { display: flex; flex-wrap: wrap; gap: 8px; min-height: 180px; }
+    .tile { min-width: 160px; padding: 10px; border-radius: 10px; color: white; }
+    .tile.up { background: #15803d; }
+    .tile.down { background: #b91c1c; }
+    .tile-title { font-weight: 700; margin-bottom: 6px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dbe1ea; border-radius: 10px; overflow: hidden; }
+    th, td { border-bottom: 1px solid #eef2f7; padding: 8px; text-align: left; font-size: 13px; }
+    th { background: #f1f5f9; }
+    .muted { color: #64748b; }
+    .footer { margin-top: 20px; font-size: 12px; color: #475569; }
+    @media (max-width: 900px) { .kpi { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Portfolio Insight</h1>
+  <div class='kpi'>
+    <div class='card'><div>Total Market Value (CAD)</div><div class='value'>N/A</div></div>
+    <div class='card'><div>Unrealized PnL</div><div class='value'>N/A (N/A)</div></div>
+    <div class='card'><div>Daily PnL</div><div class='value'>N/A (N/A)</div></div>
+    <div class='card'><div>As of</div><div class='value'>2026-02-18 16:05:53</div></div>
+  </div>
+
+  <div class='banner'>37/37 tickers unavailable; related metrics shown as N/A</div>
+
+  <div class='section'>
+    <h2>Real Exposure Treemap</h2>
+    <div class='treemap'><div class='tile up' style='flex-grow:4'><div class='tile-title'>CAD_BONDS</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>CANADA_DIVIDEND</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>CANADA_ENERGY</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>CANADA_FINANCIALS</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>CASH_DEFENSIVE</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>GLOBAL_EQUITY</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>INTL_EQUITY</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>NASDAQ_100</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>S&amp;P_500</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>UNMAPPED</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>US_DIVIDEND</div><div>$0.00</div><div>0.00%</div></div><div class='tile up' style='flex-grow:4'><div class='tile-title'>US_TOTAL_MARKET</div><div>$0.00</div><div>0.00%</div></div></div>
+  </div>
+
+  <div class='section'>
+    <h2>Overlap Buckets</h2>
+    <table><thead><tr><th>index_bucket</th><th>total_weight_pct</th><th>overlap_flag</th><th>member_tickers</th><th>member_accounts</th></tr></thead><tbody><tr><td>CAD_BONDS</td><td>0.00%</td><td>Medium</td><td>XBB.TO, ZAG.TO</td><td>TFSA</td></tr><tr><td>CANADA_DIVIDEND</td><td>0.00%</td><td>None</td><td>VDY.TO</td><td>TFSA</td></tr><tr><td>CANADA_ENERGY</td><td>0.00%</td><td>None</td><td>XEG.TO</td><td>TFSA</td></tr><tr><td>CANADA_FINANCIALS</td><td>0.00%</td><td>None</td><td>ZEB.TO</td><td>TFSA</td></tr><tr><td>CASH_DEFENSIVE</td><td>0.00%</td><td>Medium</td><td>CASH.TO, ZMMK.TO, ZST-L.TO</td><td>FHSA, TFSA</td></tr><tr><td>GLOBAL_EQUITY</td><td>0.00%</td><td>Medium</td><td>VEQT.TO, XEQT.TO</td><td>FHSA, TFSA</td></tr><tr><td>INTL_EQUITY</td><td>0.00%</td><td>None</td><td>ZEA.TO</td><td>TFSA</td></tr><tr><td>NASDAQ_100</td><td>0.00%</td><td>Medium</td><td>HXQ.TO, QQC.TO, TECH.TO, XQQ.TO</td><td>FHSA, TFSA</td></tr><tr><td>S&amp;P_500</td><td>0.00%</td><td>Medium</td><td>VFV.TO, VSP.TO, ZSP.TO</td><td>FHSA, TFSA</td></tr><tr><td>UNMAPPED</td><td>0.00%</td><td>Medium</td><td>AAPL.TO, AEM.TO, ARTI.TO, CIAI.TO, CU.TO, ENB.TO, FINN.NE, HDIV.TO, MSFT.TO, NVDA.TO, QMAX.TO, REI-UN.TO, TD.TO, UMAX.TO, WELL.TO, ZLB.TO</td><td>FHSA, TFSA</td></tr><tr><td>US_DIVIDEND</td><td>0.00%</td><td>None</td><td>ZDY.TO</td><td>TFSA</td></tr><tr><td>US_TOTAL_MARKET</td><td>0.00%</td><td>Medium</td><td>VUN.TO, XUU.TO</td><td>FHSA, TFSA</td></tr></tbody></table>
+  </div>
+
+  <div class='section grid2'>
+    <div>
+      <h2>Daily Contribution (Bucket)</h2>
+      <table><thead><tr><th>index_bucket</th><th>daily_pnl</th><th>weight_pct</th></tr></thead><tbody><tr><td>CAD_BONDS</td><td>$0.00</td><td>0.00%</td></tr><tr><td>CANADA_DIVIDEND</td><td>$0.00</td><td>0.00%</td></tr><tr><td>CANADA_ENERGY</td><td>$0.00</td><td>0.00%</td></tr><tr><td>CANADA_FINANCIALS</td><td>$0.00</td><td>0.00%</td></tr><tr><td>CASH_DEFENSIVE</td><td>$0.00</td><td>0.00%</td></tr><tr><td>GLOBAL_EQUITY</td><td>$0.00</td><td>0.00%</td></tr><tr><td>INTL_EQUITY</td><td>$0.00</td><td>0.00%</td></tr><tr><td>NASDAQ_100</td><td>$0.00</td><td>0.00%</td></tr><tr><td>S&amp;P_500</td><td>$0.00</td><td>0.00%</td></tr><tr><td>UNMAPPED</td><td>$0.00</td><td>0.00%</td></tr><tr><td>US_DIVIDEND</td><td>$0.00</td><td>0.00%</td></tr><tr><td>US_TOTAL_MARKET</td><td>$0.00</td><td>0.00%</td></tr></tbody></table>
+    </div>
+    <div>
+      <h2>Top / Bottom 5 Holdings (Daily)</h2>
+      <h3>Top 5</h3>
+      <div class='muted'>No data</div>
+      <h3>Bottom 5</h3>
+      <div class='muted'>No data</div>
+    </div>
+  </div>
+
+  <div class='section'>
+    <h2>Holdings Table</h2>
+    <table><thead><tr><th>symbol</th><th>account_type</th><th>index_bucket</th><th>market_value</th><th>today_pnl_amount</th><th>daily_return_pct</th><th>unrealized_pnl</th><th>return_pct</th><th>portfolio_weight</th></tr></thead><tbody><tr><td>AAPL</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>AAPL</td><td>FHSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>AEM</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ARTI</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ARTI</td><td>FHSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>CASH</td><td>TFSA</td><td>CASH_DEFENSIVE</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>CIAI</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>CU</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ENB</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>FINN</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>HDIV</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>HXQ</td><td>TFSA</td><td>NASDAQ_100</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>MSFT</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>MSFT</td><td>FHSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>NVDA</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>NVDA</td><td>FHSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>QMAX</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>QQC</td><td>TFSA</td><td>NASDAQ_100</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>QQC</td><td>FHSA</td><td>NASDAQ_100</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>REI.UN</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>TD</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>TECH</td><td>TFSA</td><td>NASDAQ_100</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>UMAX</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VDY</td><td>TFSA</td><td>CANADA_DIVIDEND</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VEQT</td><td>TFSA</td><td>GLOBAL_EQUITY</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VFV</td><td>TFSA</td><td>S&amp;P_500</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VFV</td><td>FHSA</td><td>S&amp;P_500</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VSP</td><td>TFSA</td><td>S&amp;P_500</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VUN</td><td>TFSA</td><td>US_TOTAL_MARKET</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>VUN</td><td>FHSA</td><td>US_TOTAL_MARKET</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>WELL</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XBB</td><td>TFSA</td><td>CAD_BONDS</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XEG</td><td>TFSA</td><td>CANADA_ENERGY</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XEQT</td><td>TFSA</td><td>GLOBAL_EQUITY</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XEQT</td><td>FHSA</td><td>GLOBAL_EQUITY</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XQQ</td><td>TFSA</td><td>NASDAQ_100</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XQQ</td><td>FHSA</td><td>NASDAQ_100</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>XUU</td><td>TFSA</td><td>US_TOTAL_MARKET</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZAG</td><td>TFSA</td><td>CAD_BONDS</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZDY</td><td>TFSA</td><td>US_DIVIDEND</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZEA</td><td>TFSA</td><td>INTL_EQUITY</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZEB</td><td>TFSA</td><td>CANADA_FINANCIALS</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZLB</td><td>TFSA</td><td>UNMAPPED</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZMMK</td><td>TFSA</td><td>CASH_DEFENSIVE</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZSP</td><td>TFSA</td><td>S&amp;P_500</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZSP</td><td>FHSA</td><td>S&amp;P_500</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>ZST.L</td><td>FHSA</td><td>CASH_DEFENSIVE</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr></tbody></table>
+  </div>
+
+  <div class='section'>
+    <h2>Account Compare</h2>
+    <div class='grid2'>
+      <div class='card'><h3>TFSA</h3><div>Market Value: N/A</div><div>Unrealized PnL: N/A</div><div>Top 3 Buckets: CAD_BONDS, CANADA_DIVIDEND, CANADA_ENERGY</div><div>Growth-bucket share: N/A</div><div>Defensive-bucket share: N/A</div></div>
+      <div class='card'><h3>FHSA</h3><div>Market Value: N/A</div><div>Unrealized PnL: N/A</div><div>Top 3 Buckets: CASH_DEFENSIVE, GLOBAL_EQUITY, NASDAQ_100</div><div>Growth-bucket share: N/A</div><div>Defensive-bucket share: N/A</div></div>
+    </div>
+  </div>
+
+  <div class='footer'>This tool provides portfolio structure insights only and does not constitute investment advice.</div>
+</body>
+</html>
