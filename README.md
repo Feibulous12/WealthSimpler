@@ -8,10 +8,11 @@ WealthSimpler is a local Python project for parsing portfolio exports, enriching
 WealthSimpler/
 ├── market_data.py                  # Legacy market-data helper (standalone)
 ├── raw.json                        # Local input data (private, gitignored)
+├── scripts/
+│   └── refresh_outputs_with_skill.sh  # Run ~/.claude/skills/portfolio-manager exporter
 └── portfolio/
     ├── main.py                     # Pipeline CLI entry
     ├── dashboard.py                # Streamlit dashboard entry
-    ├── dashboard.html              # Dashboard prototype/static artifact
     ├── requirements.txt            # Python dependencies
     └── data_pipeline/
         ├── parser.py               # Parse raw portfolio JSON
@@ -43,6 +44,33 @@ python -m portfolio.main
 ```bash
 streamlit run portfolio/dashboard.py
 ```
+
+## Use `portfolio-manager` Skill Artifacts
+
+This project includes a helper script to refresh analysis artifacts in `outputs/`
+using the local skill at `~/.claude/skills/portfolio-manager`.
+
+1. Install project dependencies:
+
+```bash
+pip install -r portfolio/requirements.txt
+```
+
+2. Refresh artifacts (auto-skip when up-to-date):
+
+```bash
+./scripts/refresh_outputs_with_skill.sh
+```
+
+3. Force full rebuild:
+
+```bash
+./scripts/refresh_outputs_with_skill.sh --force
+```
+
+Notes:
+- Override skill path with `PORTFOLIO_MANAGER_SKILL_ROOT` if needed.
+- Generated files are written to `outputs/` (CSV + Parquet + `manifest.json`).
 
 ## GitHub prep notes
 
