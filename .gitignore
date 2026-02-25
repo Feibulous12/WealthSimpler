@@ -10,3 +10,8 @@ raw.json
 
 # Local Streamlit cache/state
 .streamlit/secrets.toml
+
+# Generated local analytics artifacts (can include private holdings/account data)
+outputs/
+WealthSimpler.html
+WealthSimpler_files/

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -12,11 +13,17 @@ import streamlit as st
 from portfolio.data_pipeline.aggregate import aggregate_by_account
 from portfolio.data_pipeline.compute import compute_position_metrics
 from portfolio.data_pipeline.exposure import (
+    aggregate_by_bucket,
     build_index_buckets,
+    detect_overlap,
 )
-from portfolio.data_pipeline.market_fetch import fetch_market_data
+from portfolio.data_pipeline.market_fetch import (
+    OUTPUT_COLUMNS as MARKET_OUTPUT_COLUMNS,
+    fetch_market_data,
+)
 from portfolio.data_pipeline.parser import parse_portfolio_json
 from portfolio.data_pipeline.ticker_builder import build_yahoo_tickers
+from portfolio.dashboard_report import render_full_report
 
 
 BUCKET_DISPLAY_MAP = {
@@ -78,6 +85,33 @@ SYMBOL_INFO_MAP = {
     "ZLB": ("BMO Low Volatility Canadian Equity ETF", "0.39%"),
     "ZEB": ("BMO Equal Weight Banks Index ETF", "0.28%"),
 }
+PRIORITY_RANK = {"Immediate": 0, "High": 1, "Medium": 2, "Low": 3}
+TARGET_BUCKET_WEIGHTS = {
+    "S&P_500": 0.22,
+    "NASDAQ_100": 0.15,
+    "US_TOTAL_MARKET": 0.18,
+    "GLOBAL_EQUITY": 0.10,
+    "INTL_EQUITY": 0.05,
+    "CAD_BONDS": 0.15,
+    "CASH_DEFENSIVE": 0.05,
+    "CANADA_DIVIDEND": 0.05,
+    "US_DIVIDEND": 0.03,
+    "CANADA_FINANCIALS": 0.02,
+}
+BUCKET_BETA_MAP = {
+    "S&P_500": 1.00,
+    "NASDAQ_100": 1.20,
+    "US_TOTAL_MARKET": 1.00,
+    "GLOBAL_EQUITY": 1.00,
+    "INTL_EQUITY": 1.00,
+    "CANADA_DIVIDEND": 0.85,
+    "US_DIVIDEND": 0.85,
+    "CANADA_FINANCIALS": 1.10,
+    "CANADA_ENERGY": 1.20,
+    "CAD_BONDS": 0.25,
+    "CASH_DEFENSIVE": 0.05,
+    "INDIVIDUAL_STOCK": 1.10,
+}
 
 
 def load_json(path: str = "raw.json") -> dict:
@@ -101,6 +135,57 @@ def format_pct_signed(v: float | int | None) -> str:
     if v is None or pd.isna(v):
         return "N/A"
     return f"{v * 100:+.2f}%"
+
+
+def safe_divide(
+    numerator: pd.Series | float | int,
+    denominator: pd.Series | float | int,
+) -> pd.Series | float:
+    if isinstance(numerator, pd.Series):
+        n = pd.to_numeric(numerator, errors="coerce")
+        if isinstance(denominator, pd.Series):
+            d = pd.to_numeric(denominator, errors="coerce")
+            return n.div(d.where(d != 0))
+        d_scalar = pd.to_numeric(pd.Series([denominator]), errors="coerce").iloc[0]
+        if pd.isna(d_scalar) or d_scalar == 0:
+            return pd.Series(float("nan"), index=n.index)
+        return n / float(d_scalar)
+
+    if isinstance(denominator, pd.Series):
+        d = pd.to_numeric(denominator, errors="coerce")
+        n_scalar = pd.to_numeric(pd.Series([numerator]), errors="coerce").iloc[0]
+        if pd.isna(n_scalar):
+            return pd.Series(float("nan"), index=d.index)
+        return pd.Series(float(n_scalar), index=d.index).div(d.where(d != 0))
+
+    n = pd.to_numeric(pd.Series([numerator]), errors="coerce").iloc[0]
+    d = pd.to_numeric(pd.Series([denominator]), errors="coerce").iloc[0]
+    if pd.isna(n) or pd.isna(d) or d == 0:
+        return float("nan")
+    return float(n / d)
+
+
+def normalize_positions_for_dashboard(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    for col in ["book_value", "current_price", "market_value", "unrealized_pnl", "return_pct", "daily_return_pct"]:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    if "market_value" in out.columns and "book_value" in out.columns:
+        out["market_value"] = out["market_value"].where(out["market_value"].notna(), out["book_value"])
+    if "unrealized_pnl" in out.columns and "market_value" in out.columns and "book_value" in out.columns:
+        out["unrealized_pnl"] = out["unrealized_pnl"].where(
+            out["unrealized_pnl"].notna(),
+            out["market_value"] - out["book_value"],
+        )
+    if "return_pct" in out.columns and "unrealized_pnl" in out.columns and "book_value" in out.columns:
+        out["return_pct"] = out["return_pct"].where(
+            out["return_pct"].notna(),
+            safe_divide(out["unrealized_pnl"], out["book_value"]),
+        )
+    if "daily_return_pct" in out.columns:
+        out["daily_return_pct"] = out["daily_return_pct"].fillna(0.0)
+    return out
 
 
 def display_bucket_name(bucket: str) -> str:
@@ -197,23 +282,217 @@ def render_sticky_brand(name: str = "WealthSimpler") -> None:
     )
 
 
-@st.cache_data(show_spinner=False)
-def build_dataset(path: str = "raw.json") -> dict[str, pd.DataFrame]:
-    raw_json = load_json(path)
-    positions_df = build_yahoo_tickers(parse_portfolio_json(raw_json))
-    tickers = positions_df["ticker"].dropna().unique().tolist()
-    market_df = fetch_market_data(tickers)
-    benchmark_raw = fetch_market_data(list(BENCHMARK_TICKERS.values()))
-    benchmark_df = pd.DataFrame(
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _output_path(out_dir: Path, dataset: str) -> Path | None:
+    parquet_path = out_dir / f"{dataset}.parquet"
+    csv_path = out_dir / f"{dataset}.csv"
+    if parquet_path.exists():
+        return parquet_path
+    if csv_path.exists():
+        return csv_path
+    return None
+
+
+def _required_outputs_stale(project_root: Path, out_dir: Path) -> bool:
+    raw_path = project_root / "raw.json"
+    if not raw_path.exists():
+        return True
+
+    required = [
+        out_dir / "positions_enriched.parquet",
+        out_dir / "positions_enriched.csv",
+        out_dir / "account_summary.parquet",
+        out_dir / "account_summary.csv",
+    ]
+    if not any(p.exists() for p in required[:2]) or not any(p.exists() for p in required[2:]):
+        return True
+
+    existing = [p for p in required if p.exists()]
+    oldest_output_mtime = min(p.stat().st_mtime for p in existing)
+    return raw_path.stat().st_mtime > oldest_output_mtime
+
+
+def _data_cache_key(project_root: Path) -> str:
+    out_dir = project_root / "outputs"
+    parts: list[str] = []
+    for name in ["positions_enriched.parquet", "positions_enriched.csv", "account_summary.parquet", "account_summary.csv"]:
+        p = out_dir / name
+        if p.exists():
+            parts.append(f"{name}:{p.stat().st_mtime_ns}")
+    raw_path = project_root / "raw.json"
+    if raw_path.exists():
+        parts.append(f"raw.json:{raw_path.stat().st_mtime_ns}")
+    return "|".join(parts)
+
+
+def _refresh_outputs_with_skill(project_root: Path, force: bool = False) -> tuple[bool, str]:
+    script_path = project_root / "scripts" / "refresh_outputs_with_skill.sh"
+    if not script_path.exists():
+        return False, f"Missing skill refresh script: {script_path}"
+
+    cmd = [str(script_path)]
+    if force:
+        cmd.append("--force")
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=project_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:
+        return False, f"Failed to execute skill refresh script: {exc}"
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        return False, err or "Unknown error while refreshing outputs."
+
+    out = (proc.stdout or "").strip()
+    return True, out if out else "Artifacts refreshed."
+
+
+def _empty_market_data(tickers: list[str]) -> pd.DataFrame:
+    if not tickers:
+        return pd.DataFrame(columns=MARKET_OUTPUT_COLUMNS)
+    return pd.DataFrame(
+        {
+            "ticker": tickers,
+            "current_price": [pd.NA] * len(tickers),
+            "previous_close": [pd.NA] * len(tickers),
+            "return_1d": [pd.NA] * len(tickers),
+            "return_1w": [pd.NA] * len(tickers),
+            "return_1m": [pd.NA] * len(tickers),
+            "return_1q": [pd.NA] * len(tickers),
+            "return_ytd": [pd.NA] * len(tickers),
+        },
+        columns=MARKET_OUTPUT_COLUMNS,
+    )
+
+
+def _build_benchmark_df(allow_online_fetch: bool = True) -> pd.DataFrame:
+    base = pd.DataFrame(
         {
             "name": list(BENCHMARK_TICKERS.keys()),
             "ticker": list(BENCHMARK_TICKERS.values()),
         }
-    ).merge(benchmark_raw, on="ticker", how="left")
+    )
+    if not allow_online_fetch:
+        return base.merge(_empty_market_data(list(BENCHMARK_TICKERS.values())), on="ticker", how="left")
+    try:
+        benchmark_raw = fetch_market_data(list(BENCHMARK_TICKERS.values()))
+    except Exception:
+        benchmark_raw = _empty_market_data(list(BENCHMARK_TICKERS.values()))
+    return base.merge(benchmark_raw, on="ticker", how="left")
+
+
+def _load_outputs_dataset(
+    project_root: Path,
+    allow_online_fetch: bool = True,
+) -> dict[str, pd.DataFrame]:
+    out_dir = project_root / "outputs"
+    positions_path = _output_path(out_dir, "positions_enriched")
+    account_path = _output_path(out_dir, "account_summary")
+    if not positions_path or not account_path:
+        raise FileNotFoundError("Required outputs not found (positions_enriched/account_summary).")
+
+    positions = (
+        pd.read_parquet(positions_path)
+        if positions_path.suffix == ".parquet"
+        else pd.read_csv(positions_path)
+    )
+    positions = normalize_positions_for_dashboard(positions)
+    account_summary = (
+        pd.read_parquet(account_path)
+        if account_path.suffix == ".parquet"
+        else pd.read_csv(account_path)
+    )
+
+    if "index_bucket" not in positions.columns:
+        bucket_map_df = build_index_buckets(positions[["ticker", "symbol"]].drop_duplicates())
+        positions = positions.merge(
+            bucket_map_df[["ticker", "index_bucket"]].drop_duplicates(),
+            on="ticker",
+            how="left",
+        )
+    positions["index_bucket"] = positions["index_bucket"].fillna("INDIVIDUAL_STOCK")
+    positions["today_pnl_amount"] = pd.to_numeric(
+        positions["market_value"] * positions["daily_return_pct"], errors="coerce"
+    )
+
+    market_df = (
+        positions[["ticker", "current_price"]]
+        .drop_duplicates()
+        .assign(previous_close=pd.NA)
+        .reset_index(drop=True)
+    )
+    benchmark_df = _build_benchmark_df(allow_online_fetch=allow_online_fetch)
+    bucket_path = _output_path(out_dir, "bucket_exposure")
+    overlap_path = _output_path(out_dir, "overlap")
+    bucket_exposure = (
+        (pd.read_parquet(bucket_path) if bucket_path.suffix == ".parquet" else pd.read_csv(bucket_path))
+        if bucket_path
+        else pd.DataFrame()
+    )
+    overlap = (
+        (pd.read_parquet(overlap_path) if overlap_path.suffix == ".parquet" else pd.read_csv(overlap_path))
+        if overlap_path
+        else pd.DataFrame()
+    )
+
+    return {
+        "positions": positions,
+        "account_summary": account_summary,
+        "market": market_df,
+        "benchmarks": benchmark_df,
+        "bucket_exposure": bucket_exposure,
+        "overlap": overlap,
+    }
+
+
+@st.cache_data(show_spinner=False)
+def build_dataset(
+    path: str = "raw.json",
+    prefer_outputs: bool = True,
+    cache_key: str = "",
+    allow_online_fetch: bool = True,
+) -> dict[str, pd.DataFrame]:
+    _ = cache_key
+    project_root = _project_root()
+    if prefer_outputs:
+        # Default path: use skill artifacts and only refresh when stale/missing.
+        out_dir = project_root / "outputs"
+        if _required_outputs_stale(project_root, out_dir):
+            ok, message = _refresh_outputs_with_skill(project_root, force=False)
+            if not ok:
+                st.warning(f"Skill artifacts refresh failed; falling back to direct pipeline. Details: {message}")
+        try:
+            return _load_outputs_dataset(project_root, allow_online_fetch=allow_online_fetch)
+        except Exception as exc:
+            st.warning(f"Could not load outputs artifacts; falling back to direct pipeline. Details: {exc}")
+
+    raw_json = load_json(path)
+    positions_df = build_yahoo_tickers(parse_portfolio_json(raw_json))
+    tickers = positions_df["ticker"].dropna().unique().tolist()
+    if allow_online_fetch:
+        try:
+            market_df = fetch_market_data(tickers)
+        except Exception as exc:
+            st.warning(f"Live market fetch failed; continuing with local/offline data. Details: {exc}")
+            market_df = _empty_market_data(tickers)
+    else:
+        market_df = _empty_market_data(tickers)
+    benchmark_df = _build_benchmark_df(allow_online_fetch=allow_online_fetch)
     positions_enriched = compute_position_metrics(positions_df, market_df)
+    positions_enriched = normalize_positions_for_dashboard(positions_enriched)
 
     bucket_map_df = build_index_buckets(positions_df[["ticker", "symbol"]].drop_duplicates())
     account_summary = aggregate_by_account(positions_enriched)
+    bucket_exposure = aggregate_by_bucket(positions_enriched, bucket_map_df)
+    overlap = detect_overlap(bucket_exposure, positions_enriched, bucket_map_df)
 
     positions = positions_enriched.merge(
         bucket_map_df[["ticker", "index_bucket"]].drop_duplicates(),
@@ -230,6 +509,8 @@ def build_dataset(path: str = "raw.json") -> dict[str, pd.DataFrame]:
         "account_summary": account_summary,
         "market": market_df,
         "benchmarks": benchmark_df,
+        "bucket_exposure": bucket_exposure,
+        "overlap": overlap,
     }
 
 
@@ -239,8 +520,9 @@ def render_kpis(df: pd.DataFrame, period_label: str) -> None:
     total_pnl = df["unrealized_pnl"].sum(min_count=1)
     pnl_pct = (total_pnl / total_book) if pd.notna(total_book) and total_book != 0 else float("nan")
     period_pnl = df["selected_pnl_amount"].sum(min_count=1)
-    period_base = (df["market_value"] / (1 + df["selected_return_pct"])).sum(min_count=1)
-    period_pct = (period_pnl / period_base) if pd.notna(period_base) and period_base != 0 else float("nan")
+    base_denominator = 1 + pd.to_numeric(df["selected_return_pct"], errors="coerce")
+    period_base = safe_divide(df["market_value"], base_denominator).sum(min_count=1)
+    period_pct = safe_divide(period_pnl, period_base)
 
     def color_class(v: float | int | None) -> str:
         if v is None or pd.isna(v):
@@ -324,7 +606,7 @@ def render_treemap(df: pd.DataFrame, period_label: str, period_key: str) -> None
     leaf_df["weight_pct"] = (
         leaf_df["total_market_value"] / total_mv if pd.notna(total_mv) and total_mv else 0.0
     )
-    leaf_df["period_return_pct"] = leaf_df["period_pnl"] / leaf_df["total_market_value"]
+    leaf_df["period_return_pct"] = safe_divide(leaf_df["period_pnl"], leaf_df["total_market_value"])
     leaf_df["period_return_pct"] = leaf_df["period_return_pct"].replace(
         [float("inf"), float("-inf")], pd.NA
     ).fillna(0)
@@ -340,7 +622,7 @@ def render_treemap(df: pd.DataFrame, period_label: str, period_key: str) -> None
     bucket_df["weight_pct"] = (
         bucket_df["total_market_value"] / total_mv if pd.notna(total_mv) and total_mv else 0.0
     )
-    bucket_df["period_return_pct"] = bucket_df["period_pnl"] / bucket_df["total_market_value"]
+    bucket_df["period_return_pct"] = safe_divide(bucket_df["period_pnl"], bucket_df["total_market_value"])
     bucket_df["period_return_pct"] = bucket_df["period_return_pct"].replace(
         [float("inf"), float("-inf")], pd.NA
     ).fillna(0)
@@ -475,7 +757,7 @@ def render_weight_sunburst(df: pd.DataFrame, period_label: str) -> None:
     )
     total_mv = leaf_df["market_value"].sum(min_count=1)
     leaf_df["portfolio_weight"] = leaf_df["market_value"] / total_mv if pd.notna(total_mv) and total_mv else 0.0
-    leaf_df["period_return"] = leaf_df["selected_pnl_amount"] / leaf_df["market_value"]
+    leaf_df["period_return"] = safe_divide(leaf_df["selected_pnl_amount"], leaf_df["market_value"])
     leaf_df["period_return"] = leaf_df["period_return"].replace([float("inf"), float("-inf")], pd.NA)
 
     bucket_df = (
@@ -488,7 +770,7 @@ def render_weight_sunburst(df: pd.DataFrame, period_label: str) -> None:
     )
     bucket_df["bucket_label"] = bucket_df["index_bucket"].map(display_bucket_name)
     bucket_df["portfolio_weight"] = bucket_df["market_value"] / total_mv if pd.notna(total_mv) and total_mv else 0.0
-    bucket_df["period_return"] = bucket_df["selected_pnl_amount"] / bucket_df["market_value"]
+    bucket_df["period_return"] = safe_divide(bucket_df["selected_pnl_amount"], bucket_df["market_value"])
     bucket_df["period_return"] = bucket_df["period_return"].replace([float("inf"), float("-inf")], pd.NA)
 
     ids: list[str] = []
@@ -522,7 +804,7 @@ def render_weight_sunburst(df: pd.DataFrame, period_label: str) -> None:
         )
 
         members = leaf_df[leaf_df["index_bucket"] == bucket.index_bucket].copy()
-        members["bucket_weight"] = members["market_value"] / bucket.market_value if bucket.market_value else 0.0
+        members["bucket_weight"] = safe_divide(members["market_value"], bucket.market_value)
 
         small_mask = members["portfolio_weight"] < 0.02
         small_members = members[small_mask].copy()
@@ -556,7 +838,7 @@ def render_weight_sunburst(df: pd.DataFrame, period_label: str) -> None:
             others_pnl = small_members["selected_pnl_amount"].sum(min_count=1)
             others_pw = others_mv / total_mv if pd.notna(total_mv) and total_mv else 0.0
             others_bw = others_mv / bucket.market_value if bucket.market_value else 0.0
-            others_ret = (others_pnl / others_mv) if pd.notna(others_mv) and others_mv else float("nan")
+            others_ret = safe_divide(others_pnl, others_mv)
             others_id = f"{bucket_id}::others"
             ids.append(others_id)
             labels.append("Others")
@@ -870,7 +1152,7 @@ def render_holdings_table(df: pd.DataFrame, period_label: str) -> None:
         view = view[view["unrealized_pnl"] < 0]
 
     total_mv = df["market_value"].sum(min_count=1)
-    view["portfolio_weight"] = view["market_value"] / total_mv if pd.notna(total_mv) and total_mv else pd.NA
+    view["portfolio_weight"] = safe_divide(view["market_value"], total_mv)
 
     show = view[[
         "symbol",
@@ -930,13 +1212,335 @@ def render_account_compare(df: pd.DataFrame) -> None:
         cols[i].write(f"Defensive-bucket share: {format_pct(defensive / total if total else float('nan'))}")
 
 
+def _priority_from_drift(abs_drift: float) -> str:
+    if abs_drift >= 0.08:
+        return "Immediate"
+    if abs_drift >= 0.05:
+        return "High"
+    if abs_drift >= 0.03:
+        return "Medium"
+    return "Low"
+
+
+def _thesis_status(ret: float) -> str:
+    if pd.isna(ret):
+        return "Unknown"
+    if ret >= 0.15:
+        return "Strengthening"
+    if ret >= -0.08:
+        return "Intact"
+    if ret >= -0.20:
+        return "Weakening"
+    return "Broken"
+
+
+def build_portfolio_manager_views(
+    scoped_df: pd.DataFrame,
+    full_df: pd.DataFrame,
+    account_summary: pd.DataFrame,
+    market_df: pd.DataFrame,
+    period_label: str,
+) -> dict[str, pd.DataFrame | dict[str, float | str]]:
+    df = scoped_df.copy()
+    total_mv = float(df["market_value"].sum(min_count=1) or 0.0)
+    if total_mv <= 0:
+        total_mv = 1e-9
+    df["weight"] = safe_divide(df["market_value"], total_mv)
+
+    top_holdings = (
+        df.groupby(["ticker", "symbol", "index_bucket"], as_index=False)
+        .agg(
+            market_value=("market_value", "sum"),
+            unrealized_pnl=("unrealized_pnl", "sum"),
+            return_pct=("return_pct", "mean"),
+            selected_return_pct=("selected_return_pct", "mean"),
+            current_price=("current_price", "mean"),
+        )
+        .sort_values("market_value", ascending=False)
+    )
+    top_holdings["weight"] = safe_divide(top_holdings["market_value"], total_mv)
+    top_holdings["thesis_status"] = top_holdings["return_pct"].apply(_thesis_status)
+    top_holdings["action"] = "HOLD"
+    top_holdings.loc[top_holdings["weight"] >= 0.15, "action"] = "TRIM"
+    top_holdings.loc[(top_holdings["return_pct"] <= -0.20) & (top_holdings["weight"] >= 0.05), "action"] = "SELL"
+    top_holdings.loc[
+        (top_holdings["weight"] <= 0.03) & (top_holdings["index_bucket"].isin(["S&P_500", "US_TOTAL_MARKET", "CAD_BONDS"])),
+        "action",
+    ] = "ADD"
+    top_holdings["confidence"] = top_holdings["current_price"].notna().map({True: "High", False: "Low"})
+    top_holdings["rationale"] = top_holdings.apply(
+        lambda r: "Position size exceeds concentration threshold"
+        if r["action"] == "TRIM"
+        else (
+            "Drawdown and size indicate thesis impairment"
+            if r["action"] == "SELL"
+            else ("Core bucket underweight position" if r["action"] == "ADD" else "Thesis and sizing acceptable")
+        ),
+        axis=1,
+    )
+
+    bucket_alloc = (
+        df.groupby("index_bucket", as_index=False)["market_value"]
+        .sum()
+        .sort_values("market_value", ascending=False)
+    )
+    bucket_alloc["current_weight"] = safe_divide(bucket_alloc["market_value"], total_mv).fillna(0.0)
+    bucket_alloc["target_weight"] = bucket_alloc["index_bucket"].map(TARGET_BUCKET_WEIGHTS).fillna(0.0)
+    bucket_alloc["drift"] = bucket_alloc["current_weight"] - bucket_alloc["target_weight"]
+
+    missing_targets = sorted(set(TARGET_BUCKET_WEIGHTS.keys()) - set(bucket_alloc["index_bucket"]))
+    if missing_targets:
+        bucket_alloc = pd.concat(
+            [
+                bucket_alloc,
+                pd.DataFrame(
+                    {
+                        "index_bucket": missing_targets,
+                        "market_value": 0.0,
+                        "current_weight": 0.0,
+                        "target_weight": [TARGET_BUCKET_WEIGHTS[b] for b in missing_targets],
+                        "drift": [-TARGET_BUCKET_WEIGHTS[b] for b in missing_targets],
+                    }
+                ),
+            ],
+            ignore_index=True,
+        )
+
+    rebal = bucket_alloc.copy()
+    rebal["priority"] = rebal["drift"].abs().apply(_priority_from_drift)
+    rebal["action"] = rebal["drift"].apply(lambda d: "REDUCE" if d > 0 else "INCREASE")
+    rebal["trade_value_cad"] = rebal["drift"].abs() * total_mv
+    rebal = rebal[rebal["drift"].abs() >= 0.02].sort_values(
+        by=["priority", "trade_value_cad"], key=lambda s: s.map(PRIORITY_RANK) if s.name == "priority" else s, ascending=[True, False]
+    )
+
+    hhi = float((top_holdings["weight"].fillna(0.0) * 100).pow(2).sum())
+    top5_share = float(top_holdings["weight"].head(5).sum())
+    growth_share = float(
+        bucket_alloc[bucket_alloc["index_bucket"].isin(["NASDAQ_100", "S&P_500", "US_TOTAL_MARKET", "GLOBAL_EQUITY"])]["current_weight"].sum()
+    )
+    defensive_share = float(
+        bucket_alloc[bucket_alloc["index_bucket"].isin(["CAD_BONDS", "CASH_DEFENSIVE"])]["current_weight"].sum()
+    )
+    estimated_beta = float(
+        (bucket_alloc["current_weight"] * bucket_alloc["index_bucket"].map(BUCKET_BETA_MAP).fillna(1.0)).sum()
+    )
+    volatility_band = "Low" if estimated_beta < 0.8 else ("Moderate" if estimated_beta <= 1.05 else "High")
+    price_coverage = 1.0 - (float(market_df["current_price"].isna().mean()) if len(market_df) else 1.0)
+
+    concentration_actions: list[dict[str, str | float]] = []
+    largest = top_holdings.head(1)
+    if not largest.empty and float(largest.iloc[0]["weight"]) > 0.15:
+        concentration_actions.append(
+            {
+                "priority": "Immediate",
+                "item": f"Trim {largest.iloc[0]['symbol']} concentration",
+                "detail": f"Single position at {float(largest.iloc[0]['weight']):.1%}; target < 12-15%.",
+            }
+        )
+    if top5_share > 0.40:
+        concentration_actions.append(
+            {
+                "priority": "High",
+                "item": "Reduce top-5 concentration",
+                "detail": f"Top-5 holdings are {top5_share:.1%} of portfolio.",
+            }
+        )
+
+    rebal_actions = [
+        {
+            "priority": row.priority,
+            "item": f"{row.action} {display_bucket_name(row.index_bucket)}",
+            "detail": f"Drift {row.drift:+.1%}, rebalance about {format_cad(row.trade_value_cad)}.",
+        }
+        for row in rebal.head(8).itertuples(index=False)
+    ]
+    action_items = pd.DataFrame(concentration_actions + rebal_actions)
+    if action_items.empty:
+        action_items = pd.DataFrame(
+            [{"priority": "Low", "item": "No major drift detected", "detail": "Maintain current allocation and review next cycle."}]
+        )
+    action_items["priority_order"] = action_items["priority"].map(PRIORITY_RANK).fillna(99)
+    action_items = action_items.sort_values(["priority_order", "item"]).drop(columns=["priority_order"])
+
+    overview = {
+        "total_market_value": float(full_df["market_value"].sum(min_count=1) or 0.0),
+        "total_book_value": float(full_df["book_value"].sum(min_count=1) or 0.0),
+        "total_unrealized_pnl": float(full_df["unrealized_pnl"].sum(min_count=1) or 0.0),
+        "selected_window_pnl": float(full_df["selected_pnl_amount"].sum(min_count=1) or 0.0),
+        "price_coverage": price_coverage,
+        "hhi": hhi,
+        "top5_share": top5_share,
+        "growth_share": growth_share,
+        "defensive_share": defensive_share,
+        "estimated_beta": estimated_beta,
+        "volatility_band": volatility_band,
+        "period_label": period_label,
+    }
+
+    return {
+        "overview": overview,
+        "top_holdings": top_holdings,
+        "bucket_alloc": bucket_alloc.sort_values("current_weight", ascending=False),
+        "rebalancing": rebal,
+        "action_items": action_items,
+        "account_summary": account_summary,
+    }
+
+
+def render_portfolio_manager_web_report(
+    scoped_df: pd.DataFrame,
+    full_df: pd.DataFrame,
+    account_summary: pd.DataFrame,
+    market_df: pd.DataFrame,
+    period_label: str,
+) -> None:
+    views = build_portfolio_manager_views(scoped_df, full_df, account_summary, market_df, period_label)
+    overview = views["overview"]
+    top_holdings = views["top_holdings"]
+    bucket_alloc = views["bucket_alloc"]
+    rebalancing = views["rebalancing"]
+    action_items = views["action_items"]
+
+    st.markdown("---")
+    st.header("Portfolio Manager")
+    st.caption("Skill-aligned web report for allocation, diversification, risk, position actions, and rebalancing priorities.")
+
+    t1, t2, t3, t4, t5 = st.tabs(
+        ["Executive Summary", "Allocation & Diversification", "Risk & Performance", "Position Analysis", "Rebalancing & Action Items"]
+    )
+
+    with t1:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Market Value", format_cad(overview["total_market_value"]))
+        c2.metric("Unrealized PnL", format_cad(overview["total_unrealized_pnl"]))
+        c3.metric(f"{overview['period_label']} PnL", format_cad(overview["selected_window_pnl"]))
+        c4.metric("Price Coverage", format_pct(overview["price_coverage"]))
+        st.subheader("Data Quality")
+        st.write(
+            f"- Source: `outputs/` artifacts (with fallback).  \n"
+            f"- Price coverage: {format_pct(overview['price_coverage'])}.  \n"
+            f"- Missing price metrics are shown as N/A and excluded where required."
+        )
+        st.subheader("Holdings Overview")
+        show = top_holdings.head(10)[["symbol", "index_bucket", "market_value", "weight", "unrealized_pnl", "return_pct"]]
+        show = show.rename(
+            columns={
+                "symbol": "Symbol",
+                "index_bucket": "Bucket",
+                "market_value": "Market Value",
+                "weight": "Weight",
+                "unrealized_pnl": "Unrealized PnL",
+                "return_pct": "Return %",
+            }
+        )
+        st.dataframe(show, use_container_width=True, hide_index=True)
+
+    with t2:
+        st.subheader("Asset Allocation vs Target")
+        alloc_show = bucket_alloc.copy()
+        alloc_show["bucket"] = alloc_show["index_bucket"].map(display_bucket_name)
+        st.dataframe(
+            alloc_show[["bucket", "current_weight", "target_weight", "drift", "market_value"]].rename(
+                columns={
+                    "bucket": "Bucket",
+                    "current_weight": "Current Weight",
+                    "target_weight": "Target Weight",
+                    "drift": "Drift",
+                    "market_value": "Market Value",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.subheader("Diversification")
+        d1, d2, d3 = st.columns(3)
+        d1.metric("HHI", f"{overview['hhi']:.0f}")
+        d2.metric("Top-5 Concentration", format_pct(overview["top5_share"]))
+        d3.metric("Defensive Share", format_pct(overview["defensive_share"]))
+
+    with t3:
+        st.subheader("Risk Assessment")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Estimated Portfolio Beta", f"{overview['estimated_beta']:.2f}")
+        r2.metric("Risk Band", str(overview["volatility_band"]))
+        r3.metric("Growth Share", format_pct(overview["growth_share"]))
+        st.subheader("Performance Review")
+        p1, p2 = st.columns(2)
+        p1.metric("Book Value", format_cad(overview["total_book_value"]))
+        p2.metric("Unrealized Return", format_pct(safe_divide(overview["total_unrealized_pnl"], overview["total_book_value"])))
+        st.caption("Performance values come from current holdings metrics and selected window return columns.")
+
+    with t4:
+        st.subheader("Position Recommendations (HOLD / ADD / TRIM / SELL)")
+        pos_show = top_holdings.head(15)[
+            ["symbol", "index_bucket", "weight", "return_pct", "thesis_status", "action", "confidence", "rationale"]
+        ].rename(
+            columns={
+                "symbol": "Symbol",
+                "index_bucket": "Bucket",
+                "weight": "Weight",
+                "return_pct": "Return %",
+                "thesis_status": "Thesis",
+                "action": "Action",
+                "confidence": "Confidence",
+                "rationale": "Rationale",
+            }
+        )
+        st.dataframe(pos_show, use_container_width=True, hide_index=True)
+
+    with t5:
+        st.subheader("Rebalancing Recommendations")
+        if rebalancing.empty:
+            st.info("No material allocation drift above 2%.")
+        else:
+            rb_show = rebalancing[["priority", "index_bucket", "action", "drift", "trade_value_cad"]].rename(
+                columns={
+                    "priority": "Priority",
+                    "index_bucket": "Bucket",
+                    "action": "Action",
+                    "drift": "Drift",
+                    "trade_value_cad": "Trade Value (CAD)",
+                }
+            )
+            rb_show["Bucket"] = rb_show["Bucket"].map(display_bucket_name)
+            st.dataframe(rb_show, use_container_width=True, hide_index=True)
+        st.subheader("Action Items")
+        st.dataframe(action_items.rename(columns={"priority": "Priority", "item": "Item", "detail": "Detail"}), use_container_width=True, hide_index=True)
+
+
 def main() -> None:
     st.set_page_config(page_title="WealthSimpler", layout="wide")
     render_sticky_brand("WealthSimpler")
     st.title("WealthSimpler")
     st.caption("This tool provides portfolio structure insights only and does not constitute investment advice.")
 
-    data = build_dataset("raw.json")
+    toolbar_left, toolbar_right = st.columns([3, 1])
+    with toolbar_left:
+        offline_mode = st.checkbox(
+            "Offline mode (use local data only)",
+            value=False,
+            help="Skip live market and benchmark fetches.",
+        )
+        if offline_mode:
+            st.caption("Data source: local artifacts/pipeline only (online market fetch disabled)")
+        else:
+            st.caption("Data source: skill artifacts (`outputs/`) with pipeline fallback")
+    with toolbar_right:
+        if st.button("Refresh Outputs", use_container_width=True):
+            ok, message = _refresh_outputs_with_skill(_project_root(), force=True)
+            if ok:
+                build_dataset.clear()
+                st.success("Outputs refreshed from portfolio-manager skill.")
+                st.rerun()
+            st.error(f"Refresh failed: {message}")
+
+    data = build_dataset(
+        "raw.json",
+        prefer_outputs=True,
+        cache_key=_data_cache_key(_project_root()),
+        allow_online_fetch=not offline_mode,
+    )
     positions = data["positions"]
     controls_left, controls_right = st.columns(2)
     with controls_left:
@@ -958,9 +1562,12 @@ def main() -> None:
 
     with controls_right:
         st.caption("Account Scope")
+        account_options = ["ALL"] + sorted(
+            {str(v).strip() for v in positions["account_type"].dropna().tolist() if str(v).strip()}
+        )
         account_tab = st.radio(
             "Account Scope",
-            ["ALL", "TFSA", "FHSA"],
+            account_options,
             horizontal=True,
             label_visibility="collapsed",
         )
@@ -979,6 +1586,17 @@ def main() -> None:
     render_period_panel(scoped, period_label)
     render_holdings_table(scoped, period_label)
     render_account_compare(positions)
+
+    # Portfolio Manager Report - Full narrative analysis
+    st.markdown("---")
+    views = build_portfolio_manager_views(
+        scoped_df=scoped,
+        full_df=build_window_view(positions, return_col),
+        account_summary=data["account_summary"],
+        market_df=data["market"],
+        period_label=period_label,
+    )
+    render_full_report(views, positions, data.get("overlap", pd.DataFrame()))
 
 
 if __name__ == "__main__":
